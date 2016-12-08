@@ -173,13 +173,19 @@ def process_frame(im):
     timer.tic()
     scores, boxes = im_detect(Net, im)
     timer.toc()
-    print ('Detection took {:.3f}s for '
-           '{:d} object proposals').format(timer.total_time, boxes.shape[0])
+    #print ('Detection took {:.3f}s for '
+    #       '{:d} object proposals').format(timer.total_time, boxes.shape[0])
     #scores, boxes = im_detect(net, im)
     #vis_opencv_detections()
 	 # Visualize detections for each class
-    CONF_THRESH = 0.9
+    CONF_THRESH = 0.85
     NMS_THRESH = 0.3
+    valid_cls =set(['person','bottle','chair','tvmonitor'])
+    person_det=None
+    bottle_det=None
+    chair_det=None
+    tvmonitor_det=None
+    #valid_cls =set(['person','bottle','tvmonitor'])
 	#cv2.imshow("processing result", image)
     for cls_ind, cls in enumerate(CLASSES[1:]):
         cls_ind += 1 # because we skipped background
@@ -189,9 +195,24 @@ def process_frame(im):
                           cls_scores[:, np.newaxis])).astype(np.float32)
         keep = nms(dets, NMS_THRESH)
         dets = dets[keep, :]
-        vis_opencv_detections(im, cls, dets, thresh=CONF_THRESH)
+        if cls in valid_cls:
+            vis_opencv_detections(im, cls, dets, thresh=CONF_THRESH)
+        if cls =='bottle':
+            person_det = dets
     cv2.imshow("processing result", im)
     cv2.waitKey(1)
+    location=None
+    magnitude =None
+
+    center_cx =person_det[0] + (person_det[2]-person_det[0])/2
+    center_cy =person_det[1] + (person_det[3]-person_det[1])/2
+
+    if person_det!=None:
+        magnitude =abs((person_det[2]-person_det[0])*(person_det[3]-person_det[1]))
+        location = (center_cx-320, center_cy-240) #scale so that 0,0 is center of screen
+    return location, magnitude
+
+
 
 class Node:
     def __init__(self):
@@ -200,7 +221,7 @@ class Node:
         self.done =False
         #create a publisher for sending commands to turtlebot
         self.movement_pub = rospy.Publisher('cmd_vel_mux/input/teleop', Twist, queue_size=1)
-
+        self.state = "TRACKING"
         #self.odom_sub = rospy.Subscriber("odom", Odometry, self.Position)
         self.wheel_r = 0.07
         self.wheel_axis_l =0.23
@@ -210,8 +231,87 @@ class Node:
     def image_callback(self, ros_image):
         # convert the ros image to a format openCV can use
         cv_image = np.asarray(ToOpenCV(ros_image))
-        process_frame(cv_image)
-        return
+        location, magnitude=process_frame(cv_image)
+
+        ###########
+        # Insert turtlebot controlling logic here!
+        ###########
+        cmd = Twist()
+
+        #here we have a little state machine for controlling the turtlebot
+        #possible states:
+        #TRACKING: we are currently moving towards an object
+        #print the current state
+        rospy.loginfo("state: {}".format(self.state))
+
+        if self.state == "TRACKING":
+            #check if we can't see an object
+            if(location is None):
+                #if we can't see an object, then we should search for one
+                self.state = "SEARCHING"
+                return
+            #else...
+
+            #go forward
+            cmd.linear.x = 0.3
+
+            #this is a basic proportional controller, where the magnitude of
+            #rotation is based on how far away the object is from center
+            #we apply a 10px hysteresis for smoothing
+            print(location)
+            if(location[0][0] > 10):
+                cmd.angular.z = -0.002 * location[0][0]
+            elif(location[0][0] < 10):
+                cmd.angular.z = -0.002 * location[0][0]
+
+            #check if we are close to the object
+            if magnitude > 21000000:
+                #calculate a time 3 seconds into the future
+                #we will rotate for this period of time
+                self.rotate_expire = rospy.Time.now() + rospy.Duration.from_sec(3)
+                #set state to rotating
+                self.state = "ROTATING_AWAY"
+
+        elif self.state == "ROTATING_AWAY":
+            #check if we are done rotating
+            if rospy.Time.now() < self.rotate_expire:
+                cmd.angular.z = -0.5
+            else: #after we have rotated away, search for new target
+                self.state = "SEARCHING"
+
+        elif self.state == "SEARCHING":
+            #here we just spin  until we see an object
+            cmd.angular.z = -0.5
+            if location is not None:
+                #when we see an object, start tracking it!
+                self.state = "TRACKING"
+
+        #this state is currently unused, but we could use it for exiting
+        elif self.state == "STOP":
+            rospy.signal_shutdown("done tracking, time to exit!")
+
+
+
+
+
+        #publish command to the turtlebot
+        self.movement_pub.publish(cmd)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        #self.reaction_controller(location, magnitude)
+        #return
 
         #run our vision processing algorithm to pick out the object
         #returns the location (x,y) of the object on the screen, and the
@@ -249,12 +349,12 @@ class Node:
         if location == None:
             theta = PI/100
             self.turn(theta,0.15)
-
-        elif magnitude <Mag_stop_size and location != None:
+        #elif magnitude==0:
+        #elif magnitude <Mag_stop_size and location != None:
             #print location
             #print magnitude
 
-            theta = location[0]/30 * PI/8;
+         #theta = location[0]/30 * PI/8;
 
 
 
