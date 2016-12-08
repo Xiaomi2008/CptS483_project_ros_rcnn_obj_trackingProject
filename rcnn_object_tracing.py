@@ -18,8 +18,7 @@ import tf
 import PyKDL as kdl
 from intro_to_robotics.image_converter import ToOpenCV, depthToOpenCV
 
-global Net
-Net = 0
+
 CLASSES = ('__background__',
            'aeroplane', 'bicycle', 'bird', 'boat',
            'bottle', 'bus', 'car', 'cat', 'chair',
@@ -38,45 +37,24 @@ from geometry_msgs.msg import Point, Quaternion
 
 #roslib.load_manifest('odom_publisher')
 PI=3.14159265359
-Mag_stop_size =8000000 # size of fire hydrant
+Mag_stop_size =8000000 # size of object  to stop move toward to
 def vis_opencv_detections(im, class_name, dets, thresh=0.5):
     """Draw detected bounding boxes."""
     inds = np.where(dets[:, -1] >= thresh)[0]
     if len(inds) == 0:
-        return
-
-
+        return inds
+    red =(0,0,255)   # box color =Red
+    blue=(255,0,0)   # text color =Blue
     for i in inds:
         bbox = dets[i, :4].astype(int)
         score = dets[i, -1]
-        cv2.rectangle(im, (bbox[0],  bbox[1]), ( bbox[2],bbox[3]), (0,0,255), 1)
+        cv2.rectangle(im, (bbox[0],  bbox[1]), ( bbox[2],bbox[3]), red, 1)
         font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(im,'{:s} {:.3f}'.format(class_name, score),(bbox[0], bbox[1] - 2), font, 0.5,(255,255,255),1)
+        cv2.putText(im,'{:s} {:.3f}'.format(class_name, score),(bbox[0], bbox[1] - 2), font, 0.5,blue,1)
+    return inds
 
 
-# def demo_video(net,v_f):
-#     v_file=os.path.join(cfg.DATA_DIR,'demo',v_f)
-#     cap = cv2.VideoCapture(v_file)
-#     CONF_THRESH = 0.8
-#     NMS_THRESH = 0.3
-#     while(cap.isOpened()):
-#         ret, frame = cap.read()
-#
-#         scores, boxes = im_detect(net, frame)
-#         #cv2.imshow('frame',frame)
-#         for cls_ind, cls in enumerate(CLASSES[1:]):
-#             cls_ind += 1 # because we skipped background
-#             cls_boxes = boxes[:, 4*cls_ind:4*(cls_ind + 1)]
-#             cls_scores = scores[:, cls_ind]
-#             dets = np.hstack((cls_boxes,
-#                               cls_scores[:, np.newaxis])).astype(np.float32)
-#             keep = nms(dets, NMS_THRESH)
-#             dets = dets[keep, :]
-#         #im = np.zeros((512,512,3), np.uint8)
-#             vis_opencv_detections(frame, cls, dets, thresh=CONF_THRESH)
-#         #vis_detections(im, cls, dets, thresh=CONF_THRESH)
-#     #display the original image with the centroid drawn on the image
-#         cv2.imshow("processing result", frame)
+
 
 #this function does our image processing
 #returns the location and "size" of the detected object
@@ -114,79 +92,38 @@ def process_image(image):
     return location, magnitude
 
 
-def vis_detections(im, class_name, dets, thresh=0.5):
-    """Draw detected bounding boxes."""
-    inds = np.where(dets[:, -1] >= thresh)[0]
-    if len(inds) == 0:
-        return
+# def vis_detections(im, class_name, dets, thresh=0.5):
+#     """Draw detected bounding boxes."""
+#     inds = np.where(dets[:, -1] >= thresh)[0]
+#     if len(inds) == 0:
+#         return
 
-
-
-
-    for i in inds:
-        bbox = dets[i, :4]
-        score = dets[i, -1]
-	cv2.rectangle(im, (bbox[0],  bbox[1]), ( bbox[2],bbox[3]), (0,0,255), 2)
-	font = cv2.FONT_HERSHEY_SIMPLEX
-	cv2.putText(im,'{:s} {:.3f}'.format(class_name, score),(bbox[0], bbox[1] - 2), font, 0.5,(0,0,255),2)
-	#display the original image with the centroid drawn on the image
-    #cv2.imshow("processing result", im)
-
-    #waitKey() is necessary for making all the cv2.imshow() commands work
-    #cv2.waitKey(1)
-
-        # ax.add_patch(
-            # plt.Rectangle((bbox[0], bbox[1]),
-                          # bbox[2] - bbox[0],
-                          # bbox[3] - bbox[1], fill=False,
-                          # edgecolor='red', linewidth=3.5)
-            # )
-        # ax.text(bbox[0], bbox[1] - 2,
-                # '{:s} {:.3f}'.format(class_name, score),
-                # bbox=dict(facecolor='blue', alpha=0.5),
-                # fontsize=14, color='white')
-
-    # ax.set_title(('{} detections with '
-                  # 'p({} | box) >= {:.1f}').format(class_name, class_name,
-                                                  # thresh),
-                  # fontsize=14)
-    # plt.axis('off')
-    # plt.tight_layout()
-    # plt.draw()
+#     for i in inds:
+#         bbox = dets[i, :4]
+#         score = dets[i, -1]
+# 	cv2.rectangle(im, (bbox[0],  bbox[1]), ( bbox[2],bbox[3]), (0,0,255), 2)
+# 	font = cv2.FONT_HERSHEY_SIMPLEX
+# 	cv2.putText(im,'{:s} {:.3f}'.format(class_name, score),(bbox[0], bbox[1] - 2), font, 0.5,(0,0,255),2)
+	
 def process_frame(im):
     global Net
-	# scores shape =(N, 21) , wherer N is number of proposed regions, 21 is the number of class
-	# boxs  =(N,21*4) , every box has  4 coodinates (Left,top, righ, bottom)
     if Net == 0:
         Net=init_rcnn()
-    #im_file = os.path.join(cfg.DATA_DIR, 'demo', '001763.jpg')
-    #im = cv2.imread(im_file)
-    #scores, boxes = im_detect(net, im)
-    #print type(im)
-    #print (im.shape)
-    #print (net)
-    #cv2.imshow("processing result", im)
-    #cv2.waitKey(1)
-    #return
-
+    
     timer = Timer()
     timer.tic()
+    # scores shape =(N, 21) , wherer N is number of proposed regions, 21 is the number of class
+    # boxs  =(N,21*4) , every box has  4 coodinates (Left,top, righ, bottom)
     scores, boxes = im_detect(Net, im)
     timer.toc()
     #print ('Detection took {:.3f}s for '
     #       '{:d} object proposals').format(timer.total_time, boxes.shape[0])
-    #scores, boxes = im_detect(net, im)
-    #vis_opencv_detections()
-	 # Visualize detections for each class
     CONF_THRESH = 0.85
     NMS_THRESH = 0.3
-    valid_cls =set(['person','bottle','chair','tvmonitor'])
-    person_det=None
-    bottle_det=None
-    chair_det=None
-    tvmonitor_det=None
-    #valid_cls =set(['person','bottle','tvmonitor'])
-	#cv2.imshow("processing result", image)
+
+    # Only detect 4 object classes in robot projects
+    det_dict ={'person':None,'bottle':None,'chair':None,'tvmonitor':None}
+   
     for cls_ind, cls in enumerate(CLASSES[1:]):
         cls_ind += 1 # because we skipped background
         cls_boxes = boxes[:, 4*cls_ind:4*(cls_ind + 1)]
@@ -195,22 +132,44 @@ def process_frame(im):
                           cls_scores[:, np.newaxis])).astype(np.float32)
         keep = nms(dets, NMS_THRESH)
         dets = dets[keep, :]
-        if cls in valid_cls:
-            vis_opencv_detections(im, cls, dets, thresh=CONF_THRESH)
-        if cls =='bottle':
-            person_det = dets
-    cv2.imshow("processing result", im)
-    cv2.waitKey(1)
-    location=None
-    magnitude =None
+        if cls in det_dict.keys():
+            inds=vis_opencv_detections(im, cls, dets, thresh=CONF_THRESH)
+            if len(inds) >0:
+                det_dict[cls]=dets[inds,:]
 
-    center_cx =person_det[0] + (person_det[2]-person_det[0])/2
-    center_cy =person_det[1] + (person_det[3]-person_det[1])/2
+    # return the coodinates and probabilities of all objects in 4 classes
+    return det_dict
+   
+class object_finder:
+    def __init__(self,object_seq):
+        self.objectSeq =object_seq
+        assert(type(object_seq)==list)
+        self.valid_cls=['person','bottle','chair','tvmonitor']
+        self.curent_seq_idx =0
+        self.curret_object=self.objectSeq[ self.curent_seq_idx]
+    def next_obj(self):
+        if self.curent_seq_idx<len(self.objectSeq)-1:
+            self.curent_seq_idx+=1
+    def get_curentSeq_closed_obj_coods(self,det_dict):
+        dets=self.get_current_obj_dets(det_dict)
+        return self.find_closest_obj(dets)
+    def get_current_obj_dets(self,det_dict):
+        return det_dict[self.curret_object]
+    def find_closest_obj(self,dets):
+        location =None
+        magnitude =None
+        if dets !=None:
+            num_obj=len(dets)
+            areas=[(dets[i][2]-dets[i][0])*(dets[i][3]-dets[i][1]) for i in range(num_obj)]
+            inds =sorted(range(len(areas)), key=vals.__getitem__)
+            largest_det =dets[inds[-1]]
+            center_cx =largest_det[0] + (largest_det[2]-largest_det[0])/2
+            center_cy =largest_det[1] + (largest_det[3]-largest_det[1])/2
 
-    if person_det!=None:
-        magnitude =abs((person_det[2]-person_det[0])*(person_det[3]-person_det[1]))
-        location = (center_cx-320, center_cy-240) #scale so that 0,0 is center of screen
-    return location, magnitude
+            magnitude =areas[inds[-1]]
+            location  =(int(center_cx)-320, int(center_cy)-240)
+        return location, magnitude
+
 
 
 
@@ -223,15 +182,23 @@ class Node:
         self.movement_pub = rospy.Publisher('cmd_vel_mux/input/teleop', Twist, queue_size=1)
         self.state = "TRACKING"
         #self.odom_sub = rospy.Subscriber("odom", Odometry, self.Position)
-        self.wheel_r = 0.07
-        self.wheel_axis_l =0.23
+        #self.wheel_r = 0.07
+        #self.wheel_axis_l =0.23
+        object_finding_seq=['person','bottle','chair']
+        self.obj_finder =object_finder(object_finding_seq)
 
     #this function wll get called every time a new image comes in
     #all logic occurs in this function
     def image_callback(self, ros_image):
         # convert the ros image to a format openCV can use
         cv_image = np.asarray(ToOpenCV(ros_image))
-        location, magnitude=process_frame(cv_image)
+        #location, magnitude=process_frame(cv_image)
+        det_dicts =process_frame(cv_image)
+        location, magnitude=self.obj_finder.get_curentSeq_closed_obj_coods(det_dicts)
+        if location!=None:
+            cv2.circle(frame, (location[0]+320,location[1]+240), 10, (0,255,0), -1)
+        cv2.imshow("processing result", cv_image)
+        cv2.waitKey(1)
 
         ###########
         # Insert turtlebot controlling logic here!
@@ -265,12 +232,13 @@ class Node:
                 cmd.angular.z = -0.002 * location[0][0]
 
             #check if we are close to the object
-            if magnitude > 21000000:
+            if magnitude > 20000:
                 #calculate a time 3 seconds into the future
                 #we will rotate for this period of time
                 self.rotate_expire = rospy.Time.now() + rospy.Duration.from_sec(3)
                 #set state to rotating
                 self.state = "ROTATING_AWAY"
+                self.obj_finder.next_obj()
 
         elif self.state == "ROTATING_AWAY":
             #check if we are done rotating
@@ -296,54 +264,6 @@ class Node:
 
         #publish command to the turtlebot
         self.movement_pub.publish(cmd)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        #self.reaction_controller(location, magnitude)
-        #return
-
-        #run our vision processing algorithm to pick out the object
-        #returns the location (x,y) of the object on the screen, and the
-        #"size" of the discovered object. Size can be used to estimate
-        #distance
-        #None/0 is returned if no object is seen
-
-
-        #location, magnitude = process_frame(cv_image)
-
-
-        #print magnitude
-
-        #log the processing results
-
-        #rospy.logdebug("image location: {}\tmagnitude: {}".format(location, magnitude))
-        #self.reaction_controller(location,magnitude)
-
-
-
-
-            #print location
-            #print magnitude
-
-        ###########
-        # Insert turtlebot controlling logic here!
-        ###########
-        #cmd = Twist()
-
-
-        #publish command to the turtlebot
-        #self.movement_pub.publish(cmd)
 
     def reaction_controller(self,location, magnitude):
         if location == None:
@@ -473,7 +393,6 @@ def init_rcnn():
     return net
 
 if __name__ == "__main__":
-    net = None
     rospy.init_node("video_tracking")
     node = Node()
     #this function loops and returns when the node shuts down

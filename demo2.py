@@ -36,6 +36,42 @@ NETS = {'vgg16': ('VGG16',
         'zf': ('ZF',
                   'ZF_faster_rcnn_final.caffemodel')}
 
+class object_finder:
+    def __init__(self,object_seq):
+        self.objectSeq =object_seq
+        assert(type(object_seq)==list)
+        self.valid_cls=['person','bottle','chair','tvmonitor']
+        self.curent_seq_idx =0
+        self.curret_object=self.objectSeq[self.curent_seq_idx]
+    def next_obj(self):
+        if self.curent_seq_idx<len(self.objectSeq)-1:
+            self.curent_seq_idx+=1
+    def get_curentSeq_closed_obj_coods(self,det_dict):
+        dets=self.get_current_obj_dets(det_dict)
+        return self.find_closest_obj(dets)
+    def get_current_obj_dets(self,det_dict):
+        return det_dict[self.curret_object]
+    def find_closest_obj(self,dets):
+        location =None
+        magnitude =None
+        if dets !=None:
+            num_obj=len(dets)
+            print ('{0} of objects'.format(num_obj))
+            print dets.shape
+            #print dets[i][0],dets[i][2],dets[i][1],dets[i][3]
+            areas=[((dets[i][2]-dets[i][0])*(dets[i][3]-dets[i][1])) for i in range(num_obj)]
+            inds =sorted(range(len(areas)), key=areas.__getitem__)
+            #print areas
+            #print inds
+            largest_det =dets[inds[-1]]
+            center_cx =largest_det[0] + (largest_det[2]-largest_det[0])/2
+            center_cy =largest_det[1] + (largest_det[3]-largest_det[1])/2
+
+
+            magnitude =areas[inds[-1]]
+            location  =(int(center_cx-320), int(center_cy-240))
+
+        return location, magnitude
 
 def vis_detections(im, class_name, dets, thresh=0.5):
     """Draw detected bounding boxes."""
@@ -74,21 +110,23 @@ def vis_detections(im, class_name, dets, thresh=0.5):
 def vis_opencv_detections(im, class_name, dets, thresh=0.5):
     """Draw detected bounding boxes."""
     inds = np.where(dets[:, -1] >= thresh)[0]
-    if len(inds) == 0:
-        return
-	
-    
-    for i in inds:
-        bbox = dets[i, :4].astype(int)
-        score = dets[i, -1]
-        cv2.rectangle(im, (bbox[0],  bbox[1]), ( bbox[2],bbox[3]), (0,0,255), 1)
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(im,'{:s} {:.3f}'.format(class_name, score),(bbox[0], bbox[1] - 2), font, 0.5,(255,255,255),1)
+    if len(inds) > 0:
+        for i in inds:
+            bbox = dets[i, :4].astype(int)
+            score = dets[i, -1]
+            cv2.rectangle(im, (bbox[0],  bbox[1]), ( bbox[2],bbox[3]), (0,0,255), 1)
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            cv2.putText(im,'{:s} {:.3f}'.format(class_name, score),(bbox[0], bbox[1] - 2), font, 0.5,(255,255,255),1)
+    return inds
+
 def demo_video(net,v_f):
     v_file=os.path.join(cfg.DATA_DIR,'demo',v_f)
     cap = cv2.VideoCapture(v_file)
     CONF_THRESH = 0.8
     NMS_THRESH = 0.3
+    det_dict ={'person':None,'bottle':None,'chair':None,'tvmonitor':None}
+    object_finding_seq=['person','bottle','chair']
+    obj_finder =object_finder(object_finding_seq)
     while(cap.isOpened()):
         ret, frame = cap.read()
 
@@ -103,9 +141,22 @@ def demo_video(net,v_f):
             keep = nms(dets, NMS_THRESH)
             dets = dets[keep, :]
         #im = np.zeros((512,512,3), np.uint8)
-            vis_opencv_detections(frame, cls, dets, thresh=CONF_THRESH)
+            #vis_opencv_detections(frame, cls, dets, thresh=CONF_THRESH)
+            if cls in det_dict.keys():
+                inds=vis_opencv_detections(frame, cls, dets, thresh=CONF_THRESH)
+                print cls, len(inds)
+                if len(inds) >0:
+                    det_dict[cls]=dets[inds]
+
         #vis_detections(im, cls, dets, thresh=CONF_THRESH)
     #display the original image with the centroid drawn on the image
+        location, magnitude=obj_finder.get_curentSeq_closed_obj_coods(det_dict)
+        print location
+        if location!=None:
+            cx=location[0]
+            cy=location[1]
+            cv2.circle(frame, (cx+320,cy+240), 10, (0,255,0), -1)
+            print (cx,cy)
         cv2.imshow("processing result", frame)
 
 
@@ -216,7 +267,7 @@ if __name__ == '__main__':
         print '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
         print 'Demo for data/demo/{}'.format(im_name)
         demo(net, im_name)
-    v_name='00074.MTS'
+    v_name='MVI_0021.MOV'
     demo_video(net, v_name)
 
     #plt.show()
