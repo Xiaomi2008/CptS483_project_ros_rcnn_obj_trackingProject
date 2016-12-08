@@ -17,7 +17,7 @@ import roslib
 import tf
 import PyKDL as kdl
 from intro_to_robotics.image_converter import ToOpenCV, depthToOpenCV
-
+global Net
 
 CLASSES = ('__background__',
            'aeroplane', 'bicycle', 'bird', 'boat',
@@ -44,13 +44,13 @@ def vis_opencv_detections(im, class_name, dets, thresh=0.5):
     if len(inds) == 0:
         return inds
     red =(0,0,255)   # box color =Red
-    blue=(255,0,0)   # text color =Blue
+    blue=(0,255,25)   # text color =Blue
     for i in inds:
         bbox = dets[i, :4].astype(int)
         score = dets[i, -1]
-        cv2.rectangle(im, (bbox[0],  bbox[1]), ( bbox[2],bbox[3]), red, 1)
+        cv2.rectangle(im, (bbox[0],  bbox[1]), ( bbox[2],bbox[3]), red, 2)
         font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(im,'{:s} {:.3f}'.format(class_name, score),(bbox[0], bbox[1] - 2), font, 0.5,blue,1)
+        cv2.putText(im,'{:s} {:.3f}'.format(class_name, score),(bbox[0], bbox[1] - 2), font, 0.7,blue,1)
     return inds
 
 
@@ -104,12 +104,12 @@ def process_image(image):
 # 	cv2.rectangle(im, (bbox[0],  bbox[1]), ( bbox[2],bbox[3]), (0,0,255), 2)
 # 	font = cv2.FONT_HERSHEY_SIMPLEX
 # 	cv2.putText(im,'{:s} {:.3f}'.format(class_name, score),(bbox[0], bbox[1] - 2), font, 0.5,(0,0,255),2)
-	
+
 def process_frame(im):
     global Net
     if Net == 0:
         Net=init_rcnn()
-    
+
     timer = Timer()
     timer.tic()
     # scores shape =(N, 21) , wherer N is number of proposed regions, 21 is the number of class
@@ -118,12 +118,13 @@ def process_frame(im):
     timer.toc()
     #print ('Detection took {:.3f}s for '
     #       '{:d} object proposals').format(timer.total_time, boxes.shape[0])
-    CONF_THRESH = 0.85
+    CONF_THRESH = 0.9
     NMS_THRESH = 0.3
 
     # Only detect 4 object classes in robot projects
     det_dict ={'person':None,'bottle':None,'chair':None,'tvmonitor':None}
-   
+
+
     for cls_ind, cls in enumerate(CLASSES[1:]):
         cls_ind += 1 # because we skipped background
         cls_boxes = boxes[:, 4*cls_ind:4*(cls_ind + 1)]
@@ -139,7 +140,7 @@ def process_frame(im):
 
     # return the coodinates and probabilities of all objects in 4 classes
     return det_dict
-   
+
 class object_finder:
     def __init__(self,object_seq):
         self.objectSeq =object_seq
@@ -150,18 +151,21 @@ class object_finder:
     def next_obj(self):
         if self.curent_seq_idx<len(self.objectSeq)-1:
             self.curent_seq_idx+=1
+            self.curret_object=self.objectSeq[ self.curent_seq_idx]
     def get_curentSeq_closed_obj_coods(self,det_dict):
         dets=self.get_current_obj_dets(det_dict)
         return self.find_closest_obj(dets)
     def get_current_obj_dets(self,det_dict):
         return det_dict[self.curret_object]
+    def get_current_tracking_obj(self):
+        return self.objectSeq[ self.curent_seq_idx]
     def find_closest_obj(self,dets):
         location =None
         magnitude =None
         if dets !=None:
             num_obj=len(dets)
             areas=[(dets[i][2]-dets[i][0])*(dets[i][3]-dets[i][1]) for i in range(num_obj)]
-            inds =sorted(range(len(areas)), key=vals.__getitem__)
+            inds =sorted(range(len(areas)), key=areas.__getitem__)
             largest_det =dets[inds[-1]]
             center_cx =largest_det[0] + (largest_det[2]-largest_det[0])/2
             center_cy =largest_det[1] + (largest_det[3]-largest_det[1])/2
@@ -182,21 +186,25 @@ class Node:
         self.movement_pub = rospy.Publisher('cmd_vel_mux/input/teleop', Twist, queue_size=1)
         self.state = "TRACKING"
         #self.odom_sub = rospy.Subscriber("odom", Odometry, self.Position)
-        #self.wheel_r = 0.07
-        #self.wheel_axis_l =0.23
-        object_finding_seq=['person','bottle','chair']
+        self.wheel_r = 0.07
+        self.wheel_axis_l =0.23
+        object_finding_seq=['person']
         self.obj_finder =object_finder(object_finding_seq)
+        self.previous_location =None
+        self.previous_mag      =None
+        self.frame_count       =0
 
     #this function wll get called every time a new image comes in
     #all logic occurs in this function
     def image_callback(self, ros_image):
         # convert the ros image to a format openCV can use
         cv_image = np.asarray(ToOpenCV(ros_image))
+        #print (cv_image.shape)
         #location, magnitude=process_frame(cv_image)
         det_dicts =process_frame(cv_image)
         location, magnitude=self.obj_finder.get_curentSeq_closed_obj_coods(det_dicts)
         if location!=None:
-            cv2.circle(frame, (location[0]+320,location[1]+240), 10, (0,255,0), -1)
+            cv2.circle(cv_image, (location[0]+320,location[1]+240), 10, (0,255,0), -1)
         cv2.imshow("processing result", cv_image)
         cv2.waitKey(1)
 
@@ -209,43 +217,66 @@ class Node:
         #possible states:
         #TRACKING: we are currently moving towards an object
         #print the current state
-        rospy.loginfo("state: {}".format(self.state))
+        #rospy.loginfo("state: {}".format(self.state))
+
+        #self.reaction_controller(location, magnitude)
+
+        #return
 
         if self.state == "TRACKING":
             #check if we can't see an object
-            if(location is None):
+            if(location ==None and self.previous_location ==None):
                 #if we can't see an object, then we should search for one
                 self.state = "SEARCHING"
                 return
+            elif (location ==None and self.previous_location !=None):
+                location =self.previous_location
             #else...
 
+
+
+            self.previous_location =location
+
+            self.frame_count  +=1
+            if self.frame_count  >60:
+                self.frame_count=0
+                self.previous_location =None
             #go forward
-            cmd.linear.x = 0.3
+            cmd.linear.x = 0.15
 
             #this is a basic proportional controller, where the magnitude of
             #rotation is based on how far away the object is from center
             #we apply a 10px hysteresis for smoothing
-            print(location)
-            if(location[0][0] > 10):
-                cmd.angular.z = -0.002 * location[0][0]
-            elif(location[0][0] < 10):
-                cmd.angular.z = -0.002 * location[0][0]
+            #print(location)
+            if(location[0] > 10):
+                cmd.angular.z = -0.002 * location[0]
+            elif(location[0] < 10):
+                cmd.angular.z = -0.002 * location[0]
 
             #check if we are close to the object
-            if magnitude > 20000:
+            obj_mag = 0
+            if self.obj_finder.get_current_tracking_obj() == 'bottle':
+                obj_mag = 13000
+            elif self.obj_finder.get_current_tracking_obj() == 'person':
+                obj_mag = 125000
+            else:
+                obj_mag = 75000
+            print ('{}: {}'.format(self.obj_finder.get_current_tracking_obj(), magnitude))
+            if magnitude > obj_mag:
                 #calculate a time 3 seconds into the future
                 #we will rotate for this period of time
                 self.rotate_expire = rospy.Time.now() + rospy.Duration.from_sec(3)
                 #set state to rotating
-                self.state = "ROTATING_AWAY"
-                self.obj_finder.next_obj()
-
-        elif self.state == "ROTATING_AWAY":
-            #check if we are done rotating
-            if rospy.Time.now() < self.rotate_expire:
-                cmd.angular.z = -0.5
-            else: #after we have rotated away, search for new target
                 self.state = "SEARCHING"
+                self.obj_finder.next_obj()
+                self.previous_location =None
+
+        # elif self.state == "ROTATING_AWAY":
+        #     #check if we are done rotating
+        #     if rospy.Time.now() < self.rotate_expire:
+        #         cmd.angular.z = -0.5
+        #     else: #after we have rotated away, search for new target
+        #         self.state = "SEARCHING"
 
         elif self.state == "SEARCHING":
             #here we just spin  until we see an object
@@ -353,7 +384,7 @@ def parse_args():
     #parser.add_argument('--net', dest='demo_net', help='Network to use [vgg16]',
     #                    choices=NETS.keys(), default='vgg16')
     parser.add_argument('--net', dest='demo_net', help='Network to use [zf]',
-                        choices=NETS.keys(), default='zf')
+                        choices=NETS.keys(), default='vgg16')
 
     args = parser.parse_args()
 
@@ -393,6 +424,7 @@ def init_rcnn():
     return net
 
 if __name__ == "__main__":
+    Net =0
     rospy.init_node("video_tracking")
     node = Node()
     #this function loops and returns when the node shuts down
